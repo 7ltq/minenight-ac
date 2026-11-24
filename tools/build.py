@@ -16,6 +16,35 @@ SOURCES = {
     "totemguard": ("https://github.com/Bram1903/TotemGuard.git", "48655b552acd33db01b0f60056fa2e96abacc5a5"),
 }
 
+def configure_java() -> None:
+    candidates = []
+    if os.environ.get("JAVA_HOME"):
+        candidates.append(Path(os.environ["JAVA_HOME"]))
+    if os.name == "nt":
+        for base in {os.environ.get("ProgramFiles", ""), os.environ.get("ProgramW6432", "")}:
+            if base:
+                for vendor in ("Eclipse Adoptium", "Java", "Microsoft", "Amazon Corretto", "BellSoft"):
+                    candidates.extend(sorted((Path(base) / vendor).glob("*"), reverse=True))
+    else:
+        candidates.extend(Path("/usr/lib/jvm").glob("*"))
+    java = shutil.which("java")
+    if java:
+        candidates.append(Path(java).resolve().parent.parent)
+    exe = "java.exe" if os.name == "nt" else "java"
+    compiler = "javac.exe" if os.name == "nt" else "javac"
+    for home in candidates:
+        binary = home / "bin" / exe
+        if not binary.is_file() or not (home / "bin" / compiler).is_file():
+            continue
+        result = subprocess.run([str(binary), "-version"], capture_output=True, text=True)
+        match = re.search(r'version "(\d+)', result.stderr + result.stdout)
+        if result.returncode == 0 and match and int(match.group(1)) == 25:
+            os.environ["JAVA_HOME"] = str(home)
+            os.environ["PATH"] = str(home / "bin") + os.pathsep + os.environ.get("PATH", "")
+            print(f"[INFO] Java 25: {home}", flush=True)
+            return
+    raise RuntimeError("JDK 25 not found. Set JAVA_HOME to your JDK 25 installation.")
+
 def run(*args: str, cwd: Path = ROOT) -> None:
     subprocess.run([str(a) for a in args], cwd=cwd, check=True)
 
@@ -80,7 +109,7 @@ def build(name: str, folder: Path) -> Path:
         gradlew.chmod(0o755)
     cmd = ["cmd", "/c", str(gradlew)] if os.name == "nt" else [str(gradlew)]
     task = ":bukkit:shadowJar" if name == "grim" else ":platforms:paper:shadowJar"
-    run(*(cmd + [task, "--no-daemon", "--no-configuration-cache"]), cwd=folder)
+    run(*(cmd + [task, "-Dorg.gradle.java.home=" + os.environ["JAVA_HOME"], "--no-daemon", "--no-configuration-cache"]), cwd=folder)
     if name == "grim":
         candidates = [p for p in folder.glob("bukkit/build/libs/*.jar") if "sources" not in p.name and "javadoc" not in p.name and "plain" not in p.name]
         dest = DIST / "MineNight-GrimAC.jar"
@@ -106,6 +135,7 @@ def corresponding_source(folders: dict[str, Path]) -> None:
         archive.writestr("UPSTREAM_COMMITS.txt", "".join(f"{name}: {SOURCES[name][0]} @ {SOURCES[name][1]}\n" for name in folders))
 
 def main() -> None:
+    configure_java()
     if DIST.exists():
         shutil.rmtree(DIST)
     DIST.mkdir(parents=True)
