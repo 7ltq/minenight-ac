@@ -1,0 +1,10 @@
+.gradle/
+.build/
+out/
+dist/
+build/
+target/
+*.log
+*.tmp
+.idea/
+.vscode/
