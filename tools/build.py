@@ -70,6 +70,11 @@ def prepare(name: str) -> Path:
     return folder
 
 def grim_overlay(folder: Path) -> None:
+    for source in (folder / "common/src/main/java/ac/grim/grimac/command").rglob("*.java"):
+        content = source.read_text(encoding="utf-8")
+        updated = content.replace('commandBuilder("grim", "grimac")', 'commandBuilder("mngrim", "grim", "grimac")')
+        if updated != content:
+            source.write_text(updated, encoding="utf-8")
     messages = folder / "common/src/main/resources/messages/en.yml"
     replace(messages, 'prefix: "&bGrim &8\\u00BB"', 'prefix: "&9MineNight &8\\u00BB"')
     main = folder / "common/src/main/resources/config/en.yml"
@@ -91,8 +96,12 @@ def totem_overlay(folder: Path) -> None:
     replace(res / "config.yml", "update-checker:\n  enabled: true", "update-checker:\n  enabled: false")
     replace(res / "config.yml", "ban-animation:\n  enabled: true", "ban-animation:\n  enabled: false")
     replace(res / "config.yml", "debug-modifier-kick:\n  enabled: true", "debug-modifier-kick:\n  enabled: false")
-    replace(res / "messages.yml", 'prefix: "&#FBAF00&lTG &r&#6E6651»"', 'prefix: "&#6685E8&lMineNight &r&#8298C4»"')
+    replace(res / "messages.yml", 'prefix: "&#FBAF00&lTG &r&#6E6651»"', 'prefix: "&9MineNight &8»"')
     replace(folder / "platforms/paper/src/main/resources/plugin.yml", "name: TotemGuard", "name: MineNightTotem")
+    defaults = folder / "common/src/main/java/com/deathmotion/totemguard/common/commands/CommandDefaults.java"
+    replace(defaults, 'OPTIONS.base().isBlank() ? "totemguard" : OPTIONS.base()', '"mntotemguard"')
+    replace(defaults, 'OPTIONS.aliases().stream()', 'java.util.stream.Stream.concat(java.util.stream.Stream.of("mntg"), OPTIONS.aliases().stream())')
+    replace(res / "messages.yml", '%prefix% &#FEE067%tg_player%&#B8AC8F failed &#FBAF00%tg_check_name% &#B8AC8FVL[&#FBAF00%tg_check_violations%&#B8AC8F/&#FBAF00%tg_check_max_violations%&#B8AC8F]', '%prefix% &f%tg_player% &7failed &e%tg_check_name% &7(VL %tg_check_violations%)')
     checks = res / "checks.yml"
     content = checks.read_text(encoding="utf-8")
     if content.count("punishable: true") < 10:
