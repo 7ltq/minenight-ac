@@ -1,0 +1,36 @@
+name: Build MineNightAC Engine Foundation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build pinned engine sources
+        run: python tools/build.py
+      - name: Validate output
+        run: python tools/validate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MineNightAC-engines-unified-source
+          path: |
+            dist/MineNight-GrimAC.jar
+            dist/MineNight-TotemGuard.jar
+            dist/MineNightAC-corresponding-source.zip
+          if-no-files-found: error
+          retention-days: 14
