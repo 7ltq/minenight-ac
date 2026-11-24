@@ -43,7 +43,6 @@ def prepare(name: str) -> Path:
 def grim_overlay(folder: Path) -> None:
     messages = folder / "common/src/main/resources/messages/en.yml"
     replace(messages, 'prefix: "&bGrim &8\\u00BB"', 'prefix: "&9MineNight &8\\u00BB"')
-    replace(messages, 'alerts-format: "%prefix% &f%player% &bfailed ', 'alerts-format: "%prefix% &f%player% &bfailed ')
     main = folder / "common/src/main/resources/config/en.yml"
     replace(main, "check-for-updates: true", "check-for-updates: false")
     build = folder / "bukkit/build.gradle.kts"
@@ -83,7 +82,7 @@ def build(name: str, folder: Path) -> Path:
     task = ":bukkit:shadowJar" if name == "grim" else ":platforms:paper:shadowJar"
     run(*(cmd + [task, "--no-daemon", "--no-configuration-cache"]), cwd=folder)
     if name == "grim":
-        candidates = [p for p in folder.glob("**/*.jar") if "bukkit" in p.parts and "build" in p.parts and "libs" in p.parts and "sources" not in p.name and "javadoc" not in p.name and "plain" not in p.name]
+        candidates = [p for p in folder.glob("bukkit/build/libs/*.jar") if "sources" not in p.name and "javadoc" not in p.name and "plain" not in p.name]
         dest = DIST / "MineNight-GrimAC.jar"
     else:
         candidates = list((folder / "build").glob("TotemGuard-Paper-*.jar"))
