@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,23 @@ def configure_java() -> None:
 
 def run(*args: str, cwd: Path = ROOT) -> None:
     subprocess.run([str(a) for a in args], cwd=cwd, check=True)
+
+def run_gradle(args: list[str], cwd: Path) -> None:
+    for attempt in range(3):
+        rate_limited = False
+        with subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace") as process:
+            for line in process.stdout:
+                print(line, end="", flush=True)
+                if "status code 429" in line or "429 Too Many Requests" in line:
+                    rate_limited = True
+            code = process.wait()
+        if code == 0:
+            return
+        if not rate_limited or attempt == 2:
+            raise subprocess.CalledProcessError(code, args)
+        delay = 30 * (2 ** attempt)
+        print(f"[WARN] Repository rate limited Gradle; retrying in {delay}s ({attempt + 2}/3).", flush=True)
+        time.sleep(delay)
 
 def replace(path: Path, old: str, new: str) -> None:
     content = path.read_text(encoding="utf-8")
@@ -211,7 +229,7 @@ def build(name: str, folder: Path) -> Path:
         gradlew.chmod(0o755)
     cmd = ["cmd", "/c", str(gradlew)] if os.name == "nt" else [str(gradlew)]
     task = ":bukkit:shadowJar" if name == "grim" else ":platforms:paper:shadowJar"
-    run(*(cmd + [task, "-Dorg.gradle.java.home=" + os.environ["JAVA_HOME"], "--no-daemon", "--no-configuration-cache"]), cwd=folder)
+    run_gradle(cmd + [task, "-Dorg.gradle.java.home=" + os.environ["JAVA_HOME"], "--no-daemon", "--no-configuration-cache"], cwd=folder)
     if name == "grim":
         candidates = [p for p in folder.glob("bukkit/build/libs/*.jar") if "sources" not in p.name and "javadoc" not in p.name and "plain" not in p.name]
         dest = DIST / "MineNight-GrimAC.jar"
