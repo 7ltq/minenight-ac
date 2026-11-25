@@ -69,7 +69,95 @@ def prepare(name: str) -> Path:
         raise RuntimeError(f"Revision mismatch: {name}")
     return folder
 
+def replace_between(path: Path, start: str, end: str, replacement: str) -> None:
+    content = path.read_text(encoding="utf-8")
+    if content.count(start) != 1 or content.count(end) != 1:
+        raise RuntimeError(f"Unexpected upstream structure: {path}")
+    begin = content.index(start)
+    finish = content.index(end, begin)
+    path.write_text(content[:begin] + replacement + content[finish:], encoding="utf-8")
+
+def paper_bridge(engine: str) -> str:
+    return """    @Override
+    public boolean publishMineNightFlag(java.util.UUID target, String check, int vl, boolean eligible, net.kyori.adventure.text.Component message) {
+        org.bukkit.plugin.Plugin core = org.bukkit.Bukkit.getPluginManager().getPlugin("MineNightAllInOne");
+        if (core == null || !core.isEnabled()) return false;
+        try {
+            String serialized = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(message);
+            core.getClass().getMethod("publishMineNightAlert", String.class, java.util.UUID.class, String.class, String.class, int.class, boolean.class)
+                .invoke(core, "%s", target, check, serialized, vl, eligible);
+            return true;
+        } catch (ReflectiveOperationException | LinkageError ex) {
+            return false;
+        }
+    }
+
+""" % engine
+
+def grim_staff_bridge(folder: Path) -> None:
+    common = folder / "common/src/main/java/ac/grim/grimac"
+    api = common / "platform/api/PlatformServer.java"
+    replace(api, "    double getTPS();", """    default boolean publishMineNightFlag(java.util.UUID target, String check, int vl, boolean eligible, net.kyori.adventure.text.Component message) { return false; }
+
+    double getTPS();""")
+    server = folder / "bukkit/src/main/java/ac/grim/grimac/platform/bukkit/BukkitPlatformServer.java"
+    anchor = "    @Override\n    public double getTPS()"
+    replace(server, anchor, paper_bridge("Grim") + anchor)
+    manager = common / "manager/PunishmentManager.java"
+    replace_between(manager, "    public boolean handleAlert(GrimPlayer player, Supplier<String> verbose, Check check) {",
+                    "    private static String safeGet", """    public boolean handleAlert(GrimPlayer player, Supplier<String> verbose, Check check) {
+        for (PunishGroup group : groups) {
+            if (!group.checks.contains(check)) continue;
+            int vl = getViolations(group, check);
+            String rendered = safeGet(verbose);
+            Component message = MessageUtil.miniMessage(replaceAlertPlaceholders("[alert]", vl, check, rendered));
+            return GrimAPI.INSTANCE.getPlatformServer().publishMineNightFlag(player.uuid, check.getStableKey(), vl, !check.isExperimental(), message);
+        }
+        return false;
+    }
+
+""")
+    alert_manager = common / "manager/AlertManagerImpl.java"
+    anchor = "            HashSet<PlatformPlayer> listeners = new HashSet<>(players);"
+    replace(alert_manager, anchor, "            if (this != BRAND) return new HashSet<>();\n" + anchor)
+
+def totem_staff_bridge(folder: Path) -> None:
+    common = folder / "common/src/main/java/com/deathmotion/totemguard/common"
+    platform = common / "TGPlatform.java"
+    anchor = "    public abstract void dispatchCommand(String command);"
+    replace(platform, anchor, """    public boolean publishMineNightFlag(java.util.UUID target, String check, int vl, boolean eligible, net.kyori.adventure.text.Component message) { return false; }
+
+""" + anchor)
+    paper = folder / "platforms/paper/src/main/java/com/deathmotion/totemguard/paper/TGPaperPlatform.java"
+    anchor = "    @Override\n    public void dispatchCommand(String command)"
+    replace(paper, anchor, paper_bridge("TotemGuard") + anchor)
+    alerts = common / "features/alert/AlertRepositoryImpl.java"
+    replace_between(alerts, "        realtimeRoster.deliver(violatorUuid, realtimeMessage);", "        platform.getDatabaseRepository().recordAlert(", """        platform.publishMineNightFlag(violatorUuid, check.getName(), violations,
+                !check.isExperimental() && !check.isHeuristic() && check.getType() != CheckType.MOD, realtimeMessage);
+
+""")
+    replace(alerts, "            platform.getDiscordWebhookService().sendAlert(check, violations, debug);\n            punishmentRepository.punish(check, violations, debug, compiledDebug);\n", "")
+    replace_between(alerts, "    public void acceptRemoteFocusAlert(SyncFocusAlertPacket.Payload payload) {", "    private void sendStatusMessage", """    public void acceptRemoteFocusAlert(SyncFocusAlertPacket.Payload payload) {
+    }
+
+""")
+    replace(alerts, "        enabledAlerts.values().forEach(player -> player.sendMessage(message));", '        platform.publishMineNightFlag(new UUID(0L, 0L), "Broadcast", 0, false, message);')
+    replace_between(alerts, "    private void deliverToBroadcastViewers(@Nullable UUID violatorUuid, Component message, boolean remote) {", "    @Override\n    public void onPlayerOffline", """    private void deliverToBroadcastViewers(@Nullable UUID violatorUuid, Component message, boolean remote) {
+    }
+
+""")
+    roster = common / "features/alert/RealtimeAlertRoster.java"
+    replace_between(roster, "    public void deliver(@Nullable UUID violatorUuid, @NotNull Component message) {", "    public @NotNull Set<UUID> focusTargets()", """    public void deliver(@Nullable UUID violatorUuid, @NotNull Component message) {
+    }
+
+""")
+    punishment = common / "features/punishment/PunishmentRepositoryImpl.java"
+    anchor = "        TGPlayer player = check.player;\n        UUID playerUuid = player.getUuid();"
+    replace(punishment, anchor, """        if (!Boolean.getBoolean("minenight.totemguard.native-punishments")) return;
+""" + anchor)
+
 def grim_overlay(folder: Path) -> None:
+    grim_staff_bridge(folder)
     for source in (folder / "common/src/main/java/ac/grim/grimac/command").rglob("*.java"):
         content = source.read_text(encoding="utf-8")
         updated = content.replace('commandBuilder("grim", "grimac")', 'commandBuilder("mngrim", "grim", "grimac")')
@@ -91,6 +179,7 @@ def grim_overlay(folder: Path) -> None:
     command.write_text(content, encoding="utf-8")
 
 def totem_overlay(folder: Path) -> None:
+    totem_staff_bridge(folder)
     res = folder / "common/src/main/resources"
     watchdog = folder / "common/src/main/java/com/deathmotion/totemguard/common/player/latency/TransactionTimeoutWatchdog.java"
     replace(watchdog, "                player.timedOut();", """                if (Boolean.getBoolean("minenight.totemguard.enforce-transaction-timeout")) {
