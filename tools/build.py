@@ -92,6 +92,10 @@ def grim_overlay(folder: Path) -> None:
 
 def totem_overlay(folder: Path) -> None:
     res = folder / "common/src/main/resources"
+    watchdog = folder / "common/src/main/java/com/deathmotion/totemguard/common/player/latency/TransactionTimeoutWatchdog.java"
+    replace(watchdog, "                player.timedOut();", """                if (Boolean.getBoolean("minenight.totemguard.enforce-transaction-timeout")) {
+                    player.timedOut();
+                }""")
     replace(res / "config.yml", "server: Default", "server: MineNight")
     replace(res / "config.yml", "update-checker:\n  enabled: true", "update-checker:\n  enabled: false")
     replace(res / "config.yml", "ban-animation:\n  enabled: true", "ban-animation:\n  enabled: false")
